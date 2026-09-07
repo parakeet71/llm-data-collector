@@ -4,10 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "router-data-collector"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local, streaming LLM traffic recorder"
 requires-python = ">=3.11"
 dependencies = ["aiohttp>=3.10,<4"]
+
+[project.optional-dependencies]
+sync = ["huggingface_hub>=1.0,<2"]
 
 [project.scripts]
 router-collector = "router_collector.cli:main"

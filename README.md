@@ -1,7 +1,7 @@
 # LLM data collector
 
-Record your own Claude Code and OpenCode usage locally, then send a private export
-for router research. This is a passive recorder: it does not select models,
+Record your own Claude Code and OpenCode usage locally, with optional automatic
+uploads to a private Hugging Face dataset for router research. This is a passive recorder: it does not select models,
 retry requests, change prompts, or generate extra model calls.
 
 **Initial release: offline integration-tested on Linux; a real macOS/subscription
@@ -145,7 +145,91 @@ deduplicate by record UUID/checksum on the receiving machine.
 
 **The ZIP is not encrypted.** Transfer it directly using your agreed private
 channel. Never attach recordings to GitHub issues or push them to this repository.
-Only collector source code belongs on GitHub. Nothing is uploaded automatically.
+Only collector source code belongs on GitHub. Automatic uploads are off unless
+you enable the private Hugging Face integration below.
+
+## Automatic private Hugging Face uploads
+
+This replaces manual transfers with incremental uploads. Enable it only for
+recordings you have agreed to share with the dataset owner. Uploads include
+**existing completed recordings** in the selected data directory, not only new
+sessions. Use a separate `--data-dir` if you want to start fresh.
+
+One-time setup on the recording Mac, inside the downloaded collector folder:
+
+```sh
+source .venv/bin/activate
+python -m pip install --upgrade '.[sync]'
+hf auth login
+python -m router_collector sync-setup --repo OWNER/PRIVATE_DATASET
+python -m router_collector sync
+```
+
+Replace `OWNER/PRIVATE_DATASET` with the agreed dataset ID. The dataset must
+already exist and be **private**. Use a dedicated fine-grained token with write
+access to that dataset only; enter it at the local `hf auth login` prompt.
+No token goes in the collector configuration, GitHub, or chat. Login credentials
+remain managed by Hugging Face's local login store (or `HF_TOKEN`). The uploader
+refuses a public dataset and does not create repositories or change visibility.
+
+After setup, launch Claude Code or OpenCode using the normal collector launcher.
+A separate uploader checks for new recordings every five minutes, draining any
+backlog in batches. Connection failures retry while the launcher is running;
+model requests and local recording continue independently. On exit, it attempts
+one final batch for up to ten seconds; leftovers retry on the next launch.
+The configuration persists for that data directory.
+
+To keep uploading after the client exits (including manually imported OpenCode
+sessions and later outcome notes), leave this running in another terminal:
+
+```sh
+python -m router_collector sync --watch
+```
+
+It runs only while that process is alive; this does not install a macOS startup
+service. To upload one batch immediately, run `python -m router_collector sync`.
+The result reports uploaded files/bytes and files still pending. A per-directory
+lock prevents simultaneous workers from uploading the same batch.
+
+Pause configured automatic uploads with:
+
+```sh
+python -m router_collector sync-disable
+```
+
+Workers notice before their next batch; a batch already in progress may finish.
+Use `sync-setup --repo OWNER/PRIVATE_DATASET` to re-enable, then restart the launcher
+or `sync --watch`. For a one-off destination override, `sync --repo OWNER/DATASET`
+explicitly uploads one batch even when automatic uploads are disabled.
+
+**Storage behavior:** existing compressed files are streamed directly without
+building a ZIP, copying the dataset, or enabling the SDK's Xet cache. A small
+SQLite ledger under `.sync/` tracks successful uploads; unchanged files are
+skipped and failed batches remain pending. Only finalized, allowlisted collector
+files are uploaded. Active captures, temporary files, configuration, credentials,
+and upload state are excluded. Batches keep each traffic record together and
+normally contain at most 90 files / 64 MiB; one larger record/file is allowed.
+Session events and their transcript attachments may arrive in separate batches.
+
+Uploads do **not** delete local recordings or reset the 5 GiB storage limit.
+After verifying remote copies, you can move local recordings off the Mac and
+restart collection. Keep `.sync/` to retain upload history. Deleting it makes
+files eligible for upload again. The ledger assumes confirmed remote files stay
+present: it does not repair files manually deleted from the Hub. A crash between
+remote success and the local ledger update can cause a harmless retry to the
+same remote paths. Repository privacy is checked before each nonempty batch;
+keep the dataset private afterwards too.
+
+On the receiving machine, log in with read access and download whenever needed:
+
+```sh
+hf download OWNER/PRIVATE_DATASET --repo-type dataset \
+  --local-dir "$HOME/datasets/router-usage"
+```
+
+This transfers original raw-content recordings, not anonymized training rows.
+Review/filter them on the receiving machine. Private means access-controlled by
+Hugging Face; the recordings are not additionally end-to-end encrypted.
 
 ## What is captured
 
@@ -235,6 +319,7 @@ prices or infer undocumented allowance multipliers.
 ## Development
 
 ```sh
+python -m pip install '.[sync]'
 python -m unittest discover -s tests -v
 ```
 

@@ -14,7 +14,7 @@ from router_collector.storage import StorageBudget, CompressedWriter
 SECRET_KEYS = {'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'apikey',
                'accesstoken', 'refreshtoken', 'idtoken', 'password', 'clientsecret',
                'xapikey', 'anthropicapikey', 'anthropicauthtoken', 'zaiapikey',
-               'openaiapikey', 'glmapikey'}
+               'openaiapikey', 'glmapikey', 'hftoken', 'huggingfacehubtoken'}
 
 def sanitize(value):
     if isinstance(value, dict):

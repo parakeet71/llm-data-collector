@@ -60,3 +60,35 @@ class SessionTests(unittest.TestCase):
     def test_event_storage_failure_does_not_block_launcher(self):
         with patch.object(launch, '_save_event', side_effect=OSError('full')):
             self.assertIsNone(launch.save_event('client_start', {}))
+
+    def test_uploader_absent_without_opt_in(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(launch.subprocess, 'Popen') as process:
+            self.assertIsNone(launch.start_uploader(root))
+            process.assert_not_called()
+
+    def test_upload_start_failure_keeps_launcher_alive(self):
+        from router_collector.sync_runner import configure
+        with tempfile.TemporaryDirectory() as root:
+            configure(root, 'owner/private-data')
+            with patch.object(launch.importlib.util, 'find_spec', return_value=True), patch.object(launch.subprocess, 'Popen', side_effect=OSError('unavailable')):
+                self.assertIsNone(launch.start_uploader(root))
+
+    def test_disabled_uploads_skip_final_batch(self):
+        from unittest.mock import Mock
+        from router_collector.sync_runner import disable
+        with tempfile.TemporaryDirectory() as root:
+            disable(root)
+            worker = Mock()
+            worker.poll.return_value = None
+            with patch.object(launch.subprocess, 'Popen') as process:
+                launch.stop_uploader(worker, root)
+                worker.terminate.assert_called_once()
+                process.assert_not_called()
+
+    def test_malformed_upload_config_does_not_block_launcher(self):
+        with tempfile.TemporaryDirectory() as root:
+            state = Path(root) / '.sync'
+            state.mkdir()
+            for value in ['[]', 'null', '{"enabled":true,"repo_id":123}']:
+                (state / 'config.json').write_text(value)
+                self.assertIsNone(launch.start_uploader(root))

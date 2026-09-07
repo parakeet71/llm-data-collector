@@ -18,3 +18,4 @@ events/
 attachments/
 datasets/
 *.gz
+.sync/

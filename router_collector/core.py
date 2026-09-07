@@ -200,7 +200,7 @@ def create_app(provider, data_dir, run_id=None, *, _upstream=None, storage_budge
                     capture.abort()
                     pause()
     async def health(request):
-        return web.json_response({"status": "ok", "provider": provider, "run_id": run_id, "version": "0.2.0", "storage": budget.status()})
+        return web.json_response({"status": "ok", "provider": provider, "run_id": run_id, "version": "0.3.0", "storage": budget.status()})
     app.router.add_get("/health", health)
     app.router.add_route("*", "/{path:.*}", handle)
     return app

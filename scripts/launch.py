@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Launch a recorded client session without changing persistent client settings."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,53 @@ def save_event(*args, **kwargs):
     except OSError as exc:
         print("Session recording paused: " + type(exc).__name__, file=sys.stderr)
         return None
+
+
+def start_uploader(data_dir):
+    from router_collector.sync_runner import load_config, worker_environment
+    try:
+        config = load_config(data_dir)
+        if not config.get('enabled'):
+            return None
+        if importlib.util.find_spec('huggingface_hub') is None:
+            print('Uploads unavailable: install the collector with its [sync] extra. Recording continues locally.', file=sys.stderr)
+            return None
+        print('Automatic uploads enabled: private dataset ' + config['repo_id'], flush=True)
+        return subprocess.Popen([sys.executable, '-m', 'router_collector', '--data-dir', data_dir,
+                                 'sync', '--watch'], env=worker_environment(), start_new_session=True)
+    except (OSError, ValueError, KeyError) as exc:
+        print('Uploads unavailable (' + type(exc).__name__ + '); recording continues locally.', file=sys.stderr)
+        return None
+
+
+def stop_uploader(worker, data_dir):
+    if worker is None:
+        return
+    if worker.poll() is None:
+        worker.terminate()
+        try:
+            worker.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            worker.kill()
+            worker.wait()
+    # One bounded final batch catches exit hooks. Anything remaining retries next launch.
+    from router_collector.sync_runner import load_config, worker_environment
+    try:
+        if load_config(data_dir).get('enabled'):
+            final = subprocess.Popen([sys.executable, '-m', 'router_collector', '--data-dir', data_dir,
+                                      'sync'], env=worker_environment(), start_new_session=True)
+            try:
+                final.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                final.terminate()
+                try:
+                    final.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    final.kill()
+                    final.wait()
+                print('Remaining uploads will retry next launch or with sync --watch.', file=sys.stderr)
+    except (OSError, ValueError, KeyError):
+        print('Final upload unavailable; recordings remain local.', file=sys.stderr)
 
 
 HOOKS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
@@ -77,6 +125,7 @@ def main():
                               '--port', str(args.port), '--run-id', run_id],
                              stdout=subprocess.DEVNULL, start_new_session=True)
     child = None
+    uploader = None
     try:
         ready = False
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -98,6 +147,7 @@ def main():
         print(f'Recording locally. Run ID: {run_id}', flush=True)
         if args.client == 'opencode':
             print('Select a zai-coding-plan model. After exit, export this session for final tool/outcome evidence.', flush=True)
+        uploader = start_uploader(data_dir)
         child = subprocess.Popen(command, env=env)
         while child.poll() is None:
             if proxy.poll() is not None:
@@ -121,6 +171,7 @@ def main():
             proxy.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proxy.kill(); proxy.wait()
+        stop_uploader(uploader, data_dir)
         print(f'Recording ended. Run ID: {run_id}', flush=True)
 
 if __name__ == '__main__':

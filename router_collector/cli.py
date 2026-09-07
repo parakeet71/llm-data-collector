@@ -25,7 +25,25 @@ def main():
     outcome.add_argument("--task-id", required=True)
     outcome.add_argument("--result", choices=("accepted", "rejected", "abandoned", "unknown"), required=True)
     outcome.add_argument("--note", default="")
+    setup = commands.add_parser("sync-setup", help="Enable automatic uploads for this data directory")
+    setup.add_argument("--repo", required=True)
+    commands.add_parser("sync-disable", help="Pause configured automatic uploads")
+    sync = commands.add_parser("sync", help="Upload new completed recordings")
+    sync.add_argument("--repo", help="Override the configured private dataset for this invocation")
+    sync.add_argument("--watch", action="store_true")
+    sync.add_argument("--interval", type=int, default=300)
     args = parser.parse_args()
+    args.data_dir = args.data_dir.expanduser()
+    if args.command in {"sync-setup", "sync-disable", "sync"}:
+        from . import sync_runner
+        if args.command == "sync-setup":
+            print(json.dumps(sync_runner.configure(args.data_dir, args.repo)))
+        elif args.command == "sync-disable":
+            sync_runner.disable(args.data_dir)
+            print("Uploads disabled; a batch already in progress may finish.")
+        else:
+            raise SystemExit(sync_runner.run(args.data_dir, args.repo, args.watch, args.interval))
+        return
     if args.command == "serve":
         if not 1 <= args.port <= 65535:
             parser.error("port must be between 1 and 65535")
@@ -34,8 +52,10 @@ def main():
     elif args.command == "export":
         print(json.dumps({"files": export_records(args.data_dir, args.destination), "archive": str(args.destination)}))
     elif args.command == "status":
+        from .sync_runner import load_config
         print(json.dumps({"data_dir": str(args.data_dir),
                           "storage": StorageBudget(args.data_dir).status(),
+                          "uploads": load_config(args.data_dir),
                           "records": len(list((args.data_dir / "records").glob("*/metadata.json"))),
                           "active_or_interrupted": len(list((args.data_dir / "active").glob("*"))),
                           "outcomes": len(list((args.data_dir / "outcomes").glob("*.json")))}, indent=2))
