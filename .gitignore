@@ -17,3 +17,4 @@ outcomes/
 events/
 attachments/
 datasets/
+*.gz

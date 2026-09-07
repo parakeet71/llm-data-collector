@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 import uuid
 
+from router_collector.storage import StorageBudget, CompressedWriter
+
 SECRET_KEYS = {'authorization', 'proxyauthorization', 'cookie', 'setcookie', 'apikey',
                'accesstoken', 'refreshtoken', 'idtoken', 'password', 'clientsecret',
                'xapikey', 'anthropicapikey', 'anthropicauthtoken', 'zaiapikey',
@@ -35,11 +37,18 @@ def save_event(kind, payload, run_id=None):
     event = {'schema_version': 1, 'id': str(uuid.uuid4()), 'time': datetime.now(timezone.utc).isoformat(),
              'run_id': run_id or os.environ.get('ROUTER_COLLECTOR_RUN_ID'),
              'kind': kind, 'payload': sanitize(payload)}
-    dest = directory/(event['id']+'.json')
+    dest = directory/(event['id']+'.json.gz')
     temp = dest.with_suffix('.tmp')
-    with temp.open('x') as f:
-        json.dump(event, f, ensure_ascii=False)
-    temp.replace(dest)
+    writer = CompressedWriter(temp, StorageBudget(root()))
+    try:
+        for part in json.JSONEncoder(ensure_ascii=False).iterencode(event):
+            writer.write(part.encode('utf-8'))
+        writer.close()
+        temp.replace(dest)
+    except BaseException:
+        writer.abort()
+        temp.unlink(missing_ok=True)
+        raise
     return event['id']
 
 def snapshot(path, client, run_id, session_id):
@@ -51,19 +60,35 @@ def snapshot(path, client, run_id, session_id):
     directory = root()/'attachments'
     directory.mkdir(exist_ok=True, mode=0o700)
     directory.chmod(0o700)
-    ident = str(uuid.uuid4())
-    dest = directory/(ident+path.suffix)
-    temp = dest.with_suffix('.tmp')
+    # Hash first: identical transcripts reuse one compressed file without rewriting it.
     digest = hashlib.sha256()
-    # Raw transcript content is intentional. Secrets pasted in conversation may remain.
-    with path.open('rb') as src, temp.open('xb') as out:
+    size = 0
+    with path.open('rb') as src:
         while chunk := src.read(1024*1024):
-            out.write(chunk)
             digest.update(chunk)
-    temp.replace(dest)
+            size += len(chunk)
+    dest = directory/(digest.hexdigest()+path.suffix+'.gz')
+    if not dest.exists():
+        temp = directory/(str(uuid.uuid4())+'.tmp')
+        writer = CompressedWriter(temp, StorageBudget(root()))
+        copied = hashlib.sha256()
+        try:
+            with path.open('rb') as src:
+                while chunk := src.read(1024*1024):
+                    copied.update(chunk)
+                    writer.write(chunk)
+            writer.close()
+            if copied.digest() != digest.digest():
+                raise ValueError('Session changed during import; retry after exiting the client')
+            temp.replace(dest)
+        except BaseException:
+            writer.abort()
+            temp.unlink(missing_ok=True)
+            raise
     save_event('session_snapshot', {'client': client, 'session_id': session_id,
                'attachment': 'attachments/'+dest.name, 'sha256': digest.hexdigest(),
-               'bytes': dest.stat().st_size, 'outcome': 'unknown'}, run_id)
+               'bytes': size, 'stored_bytes': dest.stat().st_size,
+               'storage_encoding': 'gzip', 'outcome': 'unknown'}, run_id)
     return dest
 
 def main():

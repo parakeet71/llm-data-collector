@@ -24,6 +24,10 @@ python -m pip install .
 python -m router_collector --help
 ```
 
+When updating an existing installation, download the new code and run
+`python -m pip install --upgrade .` again inside its activated virtual environment.
+Existing recordings remain usable.
+
 Keep the downloaded folder: the launcher and session helpers are in `scripts/`.
 The commands below assume its virtual environment is activated. Substitute the
 actual full path to the downloaded folder where shown.
@@ -165,8 +169,47 @@ intentionally unfiltered:** secrets pasted into a prompt or printed by a tool ca
 remain, as can private code. Review/filter these on the receiving machine before
 training or sharing. Do not record projects you do not have permission to share.
 The loopback listener is for a trusted single-user machine; local processes may
-connect. Capture files/directories use owner-only permissions. Disk usage grows
-with traffic; no silent truncation/rotation is performed.
+connect. Capture files/directories use owner-only permissions. New recordings are compressed before being written; no raw staging copy is made.
+Existing recordings are not rewritten or deleted automatically.
+
+## SSD and storage protection
+
+Protection is enabled by default:
+
+- Request/response bodies, hook events and imported transcripts are gzip-compressed
+  at level 1 **before** disk writes, using a 256 KiB compressed-output buffer.
+  There is no per-token flush or raw temporary copy. Streaming to the client
+  continues normally; the collector buffers its own disk output only.
+- Identical transcript imports reuse a file named by its content hash. Changed
+  transcripts are retained in full so later filtering remains possible.
+- Collection pauses at approximately **5 GiB** in the data directory, or when
+  less than **1 GiB** of free disk space remains. Requests keep passing through;
+  the proxy prints a warning and `/health` reports its recording state. A record
+  that hits the limit is discarded rather than exported as a complete capture.
+- `python -m router_collector status` shows storage usage and configured limits.
+  After moving exported recordings off the Mac and freeing space, restart the
+  launcher to resume. Existing records are never automatically deleted.
+
+Limits are safeguards, not a filesystem quota: concurrent helpers/collectors and
+other applications can change disk usage between checks. Buffered data can be
+lost if the process crashes. The cap limits retained data, not lifetime SSD
+writes; repeatedly exporting or deleting and recollecting still writes data.
+
+Override limits in the terminal used for both the launcher and session imports
+(values are bytes; these examples retain the defaults):
+
+```sh
+export ROUTER_COLLECTOR_MAX_BYTES=5368709120
+export ROUTER_COLLECTOR_MIN_FREE_BYTES=1073741824
+```
+
+New traffic files end in `.bin.gz`, hook events in `.json.gz`, and transcripts
+in `.json.gz` or `.jsonl.gz`. Decompress once to recover the original bytes.
+Traffic metadata describes each stored body and retains its uncompressed hash.
+The export manifest hashes the actual archived files. Exports support both the
+old uncompressed format and the new compressed format; gzip files are not
+compressed a second time by ZIP. Exporting still writes an additional archive,
+and client-owned logs and manual OpenCode exports are outside these protections.
 
 ## API usage and manual proxy mode
 

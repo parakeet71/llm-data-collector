@@ -13,7 +13,15 @@ import time
 import urllib.request
 import uuid
 
-from session_capture import save_event
+from session_capture import save_event as _save_event
+
+def save_event(*args, **kwargs):
+    try:
+        return _save_event(*args, **kwargs)
+    except OSError as exc:
+        print("Session recording paused: " + type(exc).__name__, file=sys.stderr)
+        return None
+
 
 HOOKS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
          'PostToolUseFailure', 'Stop', 'SubagentStart', 'SubagentStop',

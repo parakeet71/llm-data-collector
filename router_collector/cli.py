@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from aiohttp import web
+from .storage import StorageBudget
 from .core import DEFAULT_DATA, UPSTREAMS, create_app, export_records, now, private_dir, write_json
 
 
@@ -34,12 +35,15 @@ def main():
         print(json.dumps({"files": export_records(args.data_dir, args.destination), "archive": str(args.destination)}))
     elif args.command == "status":
         print(json.dumps({"data_dir": str(args.data_dir),
+                          "storage": StorageBudget(args.data_dir).status(),
                           "records": len(list((args.data_dir / "records").glob("*/metadata.json"))),
                           "active_or_interrupted": len(list((args.data_dir / "active").glob("*"))),
                           "outcomes": len(list((args.data_dir / "outcomes").glob("*.json")))}, indent=2))
     else:
         record_id = str(uuid.uuid4())
-        write_json(private_dir(args.data_dir / "outcomes") / (record_id + ".json"),
-                   {"schema_version": 1, "id": record_id, "recorded_at": now(), "source": "explicit_user_feedback",
-                    "run_id": args.run_id, "task_id": args.task_id, "result": args.result, "note": args.note})
+        value = {"schema_version": 1, "id": record_id, "recorded_at": now(), "source": "explicit_user_feedback",
+                    "run_id": args.run_id, "task_id": args.task_id, "result": args.result, "note": args.note}
+        budget = StorageBudget(args.data_dir)
+        budget.reserve(len(json.dumps(value, indent=2, ensure_ascii=False).encode("utf-8")))
+        write_json(private_dir(args.data_dir / "outcomes") / (record_id + ".json"), value)
         print(record_id)
