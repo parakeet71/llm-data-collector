@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "router-data-collector"
+version = "0.1.0"
+description = "Local, streaming LLM traffic recorder"
+requires-python = ">=3.11"
+dependencies = ["aiohttp>=3.10,<4"]
+
+[project.scripts]
+router-collector = "router_collector.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["router_collector*"]
